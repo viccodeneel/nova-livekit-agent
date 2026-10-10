@@ -171,8 +171,20 @@ async def entrypoint(ctx: JobContext):
         room_name = metadata["room_name"]
         participant_identity = metadata["participant_identity"]
         tool_token = metadata["tool_token"]
-       if room_name != ctx.room.name:
-    raise ValueError("session room name mismatch")
+
+        if room_name != ctx.room.name:
+            raise ValueError("session room name mismatch")
+
+        if not tool_token:
+            raise ValueError("session tool token is missing")
+
+        participant = await ctx.wait_for_participant(
+            identity=participant_identity,
+        )
+
+        if participant.identity != participant_identity:
+            raise ValueError("session participant identity mismatch")
+
 
 if not tool_token:
     raise ValueError("session tool token is missing")
