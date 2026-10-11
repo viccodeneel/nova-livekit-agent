@@ -86,6 +86,8 @@ class DashboardTools:
             return True
 
     async def _call(self, name: str, arguments: dict[str, Any], user_message: str) -> str:
+        if name == "recall_memories":
+            logger.info("NOVA voice memory recall tool invoked.")
         if self._token_expires_soon():
             session = utils.http_context.http_session()
             await self._refresh_tool_token(session)
@@ -122,6 +124,10 @@ class DashboardTools:
                 message = payload.get("error") if isinstance(payload, dict) else None
                 logger.warning("NOVA voice tool rejected (%s, HTTP %s).", name, response_status)
                 raise ToolError(message if isinstance(message, str) else "NOVA could not retrieve that dashboard data.")
+            if name == "recall_memories":
+                data = payload.get("data") if isinstance(payload, dict) else None
+                memories = data.get("memories") if isinstance(data, dict) else None
+                logger.info("NOVA voice memory recall completed (%s matches).", len(memories) if isinstance(memories, list) else 0)
             return json.dumps(payload.get("data"), ensure_ascii=False, separators=(",", ":"))
         except ToolError:
             raise
