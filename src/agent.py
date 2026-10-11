@@ -178,29 +178,18 @@ async def entrypoint(ctx: JobContext):
         if not tool_token:
             raise ValueError("session tool token is missing")
 
-        participant = await ctx.wait_for_participant(
-            identity=participant_identity,
-        )
+        try:
+            participant = await ctx.wait_for_participant(
+                identity=participant_identity,
+                timeout=10.0,
+            )
+        except TimeoutError as error:
+            raise ValueError(
+                "authorized dashboard participant did not join in time"
+            ) from error
 
         if participant.identity != participant_identity:
             raise ValueError("session participant identity mismatch")
-
-
-if not tool_token:
-    raise ValueError("session tool token is missing")
-
-try:
-    participant = await ctx.wait_for_participant(
-        identity=participant_identity,
-        timeout=10.0,
-    )
-except TimeoutError as error:
-    raise ValueError(
-        "authorized dashboard participant did not join in time"
-    ) from error
-
-if participant.identity != participant_identity:
-    raise ValueError("session participant identity mismatch")
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         logger.error("voice job is missing valid NOVA session authorization metadata")
         raise ToolError("NOVA could not authorize this voice session.") from error
