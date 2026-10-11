@@ -46,6 +46,8 @@ class DashboardTools:
             self.get_open_positions,
             self.get_realized_results,
             self.remember,
+            self.recall_memories,
+            self.update_memory,
             self.forget,
             self.navigate_to_tab,
         ]
@@ -118,6 +120,7 @@ class DashboardTools:
                     response_status = response.status
             if response_status != 200 or not payload.get("success"):
                 message = payload.get("error") if isinstance(payload, dict) else None
+                logger.warning("NOVA voice tool rejected (%s, HTTP %s).", name, response_status)
                 raise ToolError(message if isinstance(message, str) else "NOVA could not retrieve that dashboard data.")
             return json.dumps(payload.get("data"), ensure_ascii=False, separators=(",", ":"))
         except ToolError:
@@ -175,6 +178,26 @@ class DashboardTools:
     ) -> str:
         """Save a short memory only when the user explicitly asked NOVA to remember it. Include the exact words from that request as evidence."""
         return await self._call("remember", {"content": content, "kind": kind, "evidence": evidence}, latest_user_message(context.session.history))
+
+    @function_tool()
+    async def recall_memories(self, context: RunContext, query: str) -> str:
+        """Retrieve relevant saved NOVA notes for the current topic. Returns only relevant notes, if any."""
+        return await self._call("recall_memories", {"query": query}, latest_user_message(context.session.history))
+
+    @function_tool()
+    async def update_memory(
+        self,
+        context: RunContext,
+        description: str,
+        content: str,
+        evidence: str,
+        kind: Literal["preference", "goal", "fact", "rule", "project", "event"] | None = None,
+    ) -> str:
+        """Update one saved NOVA note only when the user explicitly asks you to update or correct what you remember. Include exact words as evidence."""
+        arguments: dict[str, Any] = {"description": description, "content": content, "evidence": evidence}
+        if kind is not None:
+            arguments["kind"] = kind
+        return await self._call("update_memory", arguments, latest_user_message(context.session.history))
 
     @function_tool()
     async def forget(self, context: RunContext, description: str) -> str:
