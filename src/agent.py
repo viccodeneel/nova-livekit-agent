@@ -22,6 +22,10 @@ from livekit.agents import (
 from livekit.agents.beta.tools import EndCallTool
 from livekit.plugins import (
     ai_coustics,
+    cartesia,
+    deepgram,
+    openai,
+    silero,
 )
 
 from dashboard_tools import DashboardTools
@@ -80,15 +84,15 @@ NOVA should make the user's life easier by thinking clearly, communicating natur
         )
     async def on_enter(self):
         await self.session.generate_reply(
-            instructions="""Greet the user naturally using their name, adapting to the time of day when known. For example: \"Good morning, Vicco. Are we starting with trading today, or is there something else on your mind?\" Keep the greeting warm, confident, concise, and conversational. Never introduce yourself or repeat your identity, since the user already knows you. Vary the follow-up question based on the context, recent activity, and available memory. If relevant, suggest continuing an ongoing project like NOVA's development or reviewing trading activity. Don't assume what the user wants to do, and never invent context. Make every greeting feel personal, natural, and effortless, like a capable assistant who's ready for the day.
-""",
+            user_input="The user has just connected. Greet them naturally now.",
+            instructions="""Greet the user naturally using their name, adapting to the time of day when known. For example: "Good morning, Vicco. Are we starting with trading today, or is there something else on your mind?" Keep the greeting warm, confident, concise, and conversational. Never introduce yourself or repeat your identity, since the user already knows you. Vary the follow-up question based on the context, recent activity, and available memory. If relevant, suggest continuing an ongoing project like NOVA's development or reviewing trading activity. Don't assume what the user wants to do, and never invent context. Make every greeting feel personal, natural, and effortless, like a capable assistant who's ready for the day.""",
             allow_interruptions=True,
         )
 
 
 server = AgentServer(shutdown_process_timeout=60.0)
 
-async def _summarize_session(summarizer: inference.LLM, chat_ctx: ChatContext) -> str | None:
+async def _summarize_session(summarizer, chat_ctx: ChatContext) -> str | None:
     summary_ctx = ChatContext()
     summary_ctx.add_message(
         role="system",
@@ -117,7 +121,6 @@ async def _summarize_session(summarizer: inference.LLM, chat_ctx: ChatContext) -
 
     response = await summarizer.chat(
         chat_ctx=summary_ctx,
-        extra_kwargs={"reasoning_effort": "low"},
     ).collect()
     return response.text.strip() if response.text else None
 
@@ -129,7 +132,12 @@ async def _on_session_end_func(ctx: JobContext) -> None:
         return
 
     report = ctx.make_session_report()
-    summarizer = inference.LLM(model="openai/gpt-5.2-chat-latest")
+    summarizer = openai.LLM(
+        model="gemini-3.1-flash-lite",
+        api_key=os.getenv("GEMINI_API_KEY"),
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+    )
+
     summary = await _summarize_session(summarizer, report.chat_history)
     # Still POST even when summary is empty — results and timing data are
     # useful to downstream consumers regardless of whether summarization
@@ -178,39 +186,58 @@ async def entrypoint(ctx: JobContext):
         if not tool_token:
             raise ValueError("session tool token is missing")
 
-        try:
-            participant = await ctx.wait_for_participant(
-                identity=participant_identity,
-                timeout=10.0,
-            )
-        except TimeoutError as error:
-            raise ValueError(
-                "authorized dashboard participant did not join in time"
-            ) from error
-
-        if participant.identity != participant_identity:
-            raise ValueError("session participant identity mismatch")
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-        logger.error("voice job is missing valid NOVA session authorization metadata")
-        raise ToolError("NOVA could not authorize this voice session.") from error
+        logger.error(
+            "NOVA session metadata validation failed: %s",
+            type(error).__name__,
+        )
+        raise ToolError(
+            "NOVA could not authorize this voice session."
+        ) from error
+
+    try:
+        participant = await asyncio.wait_for(
+            ctx.wait_for_participant(identity=participant_identity),
+            timeout=10.0,
+        )
+    except TimeoutError as error:
+        raise ToolError(
+            "The authorized dashboard participant did not join in time."
+        ) from error
+
+    if participant.identity != participant_identity:
+        raise ToolError("NOVA session participant identity mismatch.")
 
     session = AgentSession(
-        stt=inference.STT(model="deepgram/nova-3", language="en"),
-        stt_context_options={"keyterm_detection": {"enabled": True}},
-        llm=inference.LLM(
-            model="google/gemma-4-31b-it",
-        ),
-        tts=inference.TTS(
-            model="cartesia/sonic-3",
-            voice="a167e0f3-df7e-4d52-a9c3-f949145efdab",
-            language="en-US"
-        ),
-        turn_handling=TurnHandlingOptions(
-            turn_detection=inference.TurnDetector(),
-            preemptive_generation={"enabled": True},
-        ),
-        vad=inference.VAD(),
-    )
+    stt=deepgram.STT(
+        model="nova-3",
+        language="en",
+        keyterm=[
+            "NOVA",
+            "MetaTrader 5",
+            "trade history",
+            "trading account",
+            "drawdown",
+        ],
+    ),
+    turn_handling=TurnHandlingOptions(
+    turn_detection="vad",
+    interruption={"mode": "vad"},
+    preemptive_generation={"enabled": False},
+),
+    llm=openai.LLM(
+    model="gemini-3.1-flash-lite",
+    api_key=os.getenv("GEMINI_API_KEY"),
+    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+),
+    tts=cartesia.TTS(
+        model="sonic-3",
+        voice="a167e0f3-df7e-4d52-a9c3-f949145efdab",
+        language="en",
+    ),
+
+    vad=silero.VAD.load(),
+)
 
     await session.start(
         agent=DefaultAgent(room=ctx.room, room_name=room_name, participant_identity=participant_identity, tool_token=tool_token),

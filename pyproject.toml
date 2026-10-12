@@ -9,12 +9,12 @@ description = "Single prompt voice AI agent built with LiveKit Agents for Python
 requires-python = ">=3.10"
 
 dependencies = [
-    "livekit-agents>=1.6.9,<2",
+    "livekit-agents[cartesia,deepgram,openai,silero,turn-detector]~=1.8",
     "livekit-plugins-ai-coustics~=0.2",
     "livekit-plugins-noise-cancellation~=0.2",
     "python-dotenv",
     "aiohttp",
-    "python-handlebars"
+    "python-handlebars",
 ]
 
 [dependency-groups]
